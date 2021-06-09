@@ -412,3 +412,29 @@ TEST_CASE("run benchmark", "[benchmark][approvals]") {
 
     CHECK((end - start).count() == 2867251000);
 }
+
+TEST_CASE("Benchmark can assert", "[benchmark][failing]") {
+    // Benchmark doesn't properly handle test failures and co, due to how
+    // it attempts to report error, and ends up rethrowing assertion failure,
+    // instead of properly notifying reporters.
+
+    // This fails the TEST_CASE, but also breaks the output formatting
+    // because an `OverallResult` element is placed inside the benchmark
+    // before test case ends
+    BENCHMARK("Failing benchmark 1") {
+        REQUIRE(1 == 2);
+    };
+
+    // This fails the TEST_CASE, but also breaks the output formatting
+    // because an `OverallResult` element is placed inside the benchmark,
+    // but at least the failure is reported.
+    BENCHMARK("Failing benchmark 2") {
+        FAIL("This benchmark doesn't benchmark anything, it just fails. You probably shouldn't do this at home.");
+    };
+
+    // This doesn't actually fail the TEST_CASE, but the output formatting
+    // is fine, and tags are properly nested.
+    BENCHMARK("Failing benchmark 3") {
+        throw 1;
+    };
+}

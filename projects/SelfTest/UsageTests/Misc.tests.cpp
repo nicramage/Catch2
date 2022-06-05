@@ -490,7 +490,8 @@ TEMPLATE_TEST_CASE_SIG("#1954 - 7 arg template test case sig compiles", "[regres
     SUCCEED();
 }
 
-#if defined(CATCH_PLATFORM_WINDOWS)
+// MinGW doesn't support __try, and Clang has only very partial support
+#if defined(_MSC_VER)
 #include <Windows.h>
 
 void throw_and_catch()
@@ -521,6 +522,6 @@ TEST_CASE("Validate SEH behavior - unhandled", "[.approvals][FatalConditionHandl
     // Validate that Catch2 framework correctly handles tests raising and not handling SEH exceptions.
     throw_no_catch();
 }
-#endif
+#endif // _MSC_VER
 
 }} // namespace MiscTests

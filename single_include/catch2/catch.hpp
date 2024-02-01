@@ -1,9 +1,9 @@
 /*
  *  Catch v2.13.10
- *  Generated: 2022-10-16 11:01:23.452308
+ *  Generated: 2024-02-01 17:35:10.410964
  *  ----------------------------------------------------------
  *  This file has been merged from multiple headers. Please don't edit it directly
- *  Copyright (c) 2022 Two Blue Cubes Ltd. All rights reserved.
+ *  Copyright (c) 2024 Two Blue Cubes Ltd. All rights reserved.
  *
  *  Distributed under the Boost Software License, Version 1.0. (See accompanying
  *  file LICENSE_1_0.txt or copy at http://www.boost.org/LICENSE_1_0.txt)
@@ -5262,6 +5262,10 @@ namespace Catch {
 #include <vector>
 #include <string>
 
+#ifndef CATCH_CONFIG_CONSOLE_MAXIMUM_WIDTH
+#define CATCH_CONFIG_CONSOLE_MAXIMUM_WIDTH 512
+#endif
+
 #ifndef CATCH_CONFIG_CONSOLE_WIDTH
 #define CATCH_CONFIG_CONSOLE_WIDTH 80
 #endif
@@ -5963,10 +5967,11 @@ namespace Catch {
 
     template<char C>
     char const* getLineOfChars() {
-        static char line[CATCH_CONFIG_CONSOLE_WIDTH] = {0};
+        static char line[CATCH_CONFIG_CONSOLE_MAXIMUM_WIDTH] = {0};
         if( !*line ) {
-            std::memset( line, C, CATCH_CONFIG_CONSOLE_WIDTH-1 );
-            line[CATCH_CONFIG_CONSOLE_WIDTH-1] = 0;
+            auto consoleWidth = static_cast<size_t> (CATCH_CONFIG_CONSOLE_WIDTH);
+            std::memset( line, C, consoleWidth-1 );
+            line[consoleWidth-1] = 0;
         }
         return line;
     }
@@ -10171,7 +10176,10 @@ namespace {
 
 #elif defined( CATCH_CONFIG_COLOUR_ANSI ) //////////////////////////////////////
 
-#include <unistd.h>
+#if defined( CATCH_PLATFORM_LINUX ) || defined( CATCH_PLATFORM_MAC )
+#    define CATCH_INTERNAL_HAS_ISATTY
+#    include <unistd.h>
+#endif
 
 namespace Catch {
 namespace {
@@ -10220,7 +10228,8 @@ namespace {
 #if defined(CATCH_PLATFORM_MAC) || defined(CATCH_PLATFORM_IPHONE)
             !isDebuggerActive() &&
 #endif
-#if !(defined(__DJGPP__) && defined(__STRICT_ANSI__))
+#if defined( CATCH_INTERNAL_HAS_ISATTY ) && \
+    !( defined( __DJGPP__ ) && defined( __STRICT_ANSI__ ) )
             isatty(STDOUT_FILENO)
 #else
             false
@@ -10805,7 +10814,7 @@ namespace Catch {
         { static_cast<DWORD>(EXCEPTION_INT_DIVIDE_BY_ZERO), "Divide by zero error" },
     };
 
-    static LONG CALLBACK handleVectoredException(PEXCEPTION_POINTERS ExceptionInfo) {
+    static LONG CALLBACK topLevelExceptionFilter(PEXCEPTION_POINTERS ExceptionInfo) {
         for (auto const& def : signalDefs) {
             if (ExceptionInfo->ExceptionRecord->ExceptionCode == def.id) {
                 reportFatal(def.name);
@@ -10819,7 +10828,7 @@ namespace Catch {
     // Since we do not support multiple instantiations, we put these
     // into global variables and rely on cleaning them up in outlined
     // constructors/destructors
-    static PVOID exceptionHandlerHandle = nullptr;
+    static LPTOP_LEVEL_EXCEPTION_FILTER previousTopLevelExceptionFilter = nullptr;
 
     // For MSVC, we reserve part of the stack memory for handling
     // memory overflow structured exception.
@@ -10839,18 +10848,15 @@ namespace Catch {
     FatalConditionHandler::~FatalConditionHandler() = default;
 
     void FatalConditionHandler::engage_platform() {
-        // Register as first handler in current chain
-        exceptionHandlerHandle = AddVectoredExceptionHandler(1, handleVectoredException);
-        if (!exceptionHandlerHandle) {
-            CATCH_RUNTIME_ERROR("Could not register vectored exception handler");
-        }
+        // Register as a the top level exception filter.
+        previousTopLevelExceptionFilter = SetUnhandledExceptionFilter(topLevelExceptionFilter);
     }
 
     void FatalConditionHandler::disengage_platform() {
-        if (!RemoveVectoredExceptionHandler(exceptionHandlerHandle)) {
-            CATCH_RUNTIME_ERROR("Could not unregister vectored exception handler");
+        if (SetUnhandledExceptionFilter(reinterpret_cast<LPTOP_LEVEL_EXCEPTION_FILTER>(previousTopLevelExceptionFilter)) != topLevelExceptionFilter) {
+            CATCH_RUNTIME_ERROR("Could not restore previous top level exception filter");
         }
-        exceptionHandlerHandle = nullptr;
+        previousTopLevelExceptionFilter = nullptr;
     }
 
 } // end namespace Catch
@@ -11345,6 +11351,7 @@ namespace Catch {
             }
         }
 
+        auto consoleWidth = static_cast<size_t> (CATCH_CONFIG_CONSOLE_WIDTH);
         for( auto const& tagCount : tagCounts ) {
             ReusableStringStream rss;
             rss << "  " << std::setw(2) << tagCount.second.count << "  ";
@@ -11352,7 +11359,7 @@ namespace Catch {
             auto wrapper = Column( tagCount.second.all() )
                                                     .initialIndent( 0 )
                                                     .indent( str.size() )
-                                                    .width( CATCH_CONFIG_CONSOLE_WIDTH-10 );
+                                                    .width( consoleWidth-10 );
             Catch::cout() << str << wrapper << '\n';
         }
         Catch::cout() << pluralise( tagCounts.size(), "tag" ) << '\n' << std::endl;
@@ -11366,6 +11373,7 @@ namespace Catch {
         for( auto const& factoryKvp : factories )
             maxNameLen = (std::max)( maxNameLen, factoryKvp.first.size() );
 
+        auto consoleWidth = static_cast<size_t> (CATCH_CONFIG_CONSOLE_WIDTH);
         for( auto const& factoryKvp : factories ) {
             Catch::cout()
                     << Column( factoryKvp.first + ":" )
@@ -11374,7 +11382,7 @@ namespace Catch {
                     +  Column( factoryKvp.second->getDescription() )
                             .initialIndent(0)
                             .indent(2)
-                            .width( CATCH_CONFIG_CONSOLE_WIDTH - maxNameLen-8 )
+                            .width( consoleWidth - maxNameLen-8 )
                     << "\n";
         }
         Catch::cout() << std::endl;
@@ -16272,7 +16280,7 @@ private:
 };
 
 std::size_t makeRatio(std::size_t number, std::size_t total) {
-    std::size_t ratio = total > 0 ? CATCH_CONFIG_CONSOLE_WIDTH * number / total : 0;
+    std::size_t ratio = total > 0 ? static_cast<size_t> (CATCH_CONFIG_CONSOLE_WIDTH) * number / total : 0;
     return (ratio == 0 && number > 0) ? 1 : ratio;
 }
 
@@ -16448,10 +16456,11 @@ ConsoleReporter::ConsoleReporter(ReporterConfig const& config)
     : StreamingReporterBase(config),
     m_tablePrinter(new TablePrinter(config.stream(),
         [&config]() -> std::vector<ColumnInfo> {
+        auto consoleWidth = static_cast<int> (CATCH_CONFIG_CONSOLE_WIDTH);
         if (config.fullConfig()->benchmarkNoAnalysis())
         {
             return{
-                { "benchmark name", CATCH_CONFIG_CONSOLE_WIDTH - 43, ColumnInfo::Left },
+                { "benchmark name", consoleWidth - 43, ColumnInfo::Left },
                 { "     samples", 14, ColumnInfo::Right },
                 { "  iterations", 14, ColumnInfo::Right },
                 { "        mean", 14, ColumnInfo::Right }
@@ -16460,7 +16469,7 @@ ConsoleReporter::ConsoleReporter(ReporterConfig const& config)
         else
         {
             return{
-                { "benchmark name", CATCH_CONFIG_CONSOLE_WIDTH - 43, ColumnInfo::Left },
+                { "benchmark name", consoleWidth - 43, ColumnInfo::Left },
                 { "samples      mean       std dev", 14, ColumnInfo::Right },
                 { "iterations   low mean   low std dev", 14, ColumnInfo::Right },
                 { "estimated    high mean  high std dev", 14, ColumnInfo::Right }
@@ -16753,13 +16762,14 @@ void ConsoleReporter::printSummaryRow(std::string const& label, std::vector<Summ
 }
 
 void ConsoleReporter::printTotalsDivider(Totals const& totals) {
+    auto consoleWidth = static_cast<size_t> (CATCH_CONFIG_CONSOLE_WIDTH);
     if (totals.testCases.total() > 0) {
         std::size_t failedRatio = makeRatio(totals.testCases.failed, totals.testCases.total());
         std::size_t failedButOkRatio = makeRatio(totals.testCases.failedButOk, totals.testCases.total());
         std::size_t passedRatio = makeRatio(totals.testCases.passed, totals.testCases.total());
-        while (failedRatio + failedButOkRatio + passedRatio < CATCH_CONFIG_CONSOLE_WIDTH - 1)
+        while (failedRatio + failedButOkRatio + passedRatio < consoleWidth - 1)
             findMax(failedRatio, failedButOkRatio, passedRatio)++;
-        while (failedRatio + failedButOkRatio + passedRatio > CATCH_CONFIG_CONSOLE_WIDTH - 1)
+        while (failedRatio + failedButOkRatio + passedRatio > consoleWidth - 1)
             findMax(failedRatio, failedButOkRatio, passedRatio)--;
 
         stream << Colour(Colour::Error) << std::string(failedRatio, '=');
@@ -16769,7 +16779,7 @@ void ConsoleReporter::printTotalsDivider(Totals const& totals) {
         else
             stream << Colour(Colour::Success) << std::string(passedRatio, '=');
     } else {
-        stream << Colour(Colour::Warning) << std::string(CATCH_CONFIG_CONSOLE_WIDTH - 1, '=');
+        stream << Colour(Colour::Warning) << std::string(consoleWidth - 1, '=');
     }
     stream << '\n';
 }
@@ -17973,4 +17983,3 @@ using Catch::Detail::Approx;
 // end catch_reenable_warnings.h
 // end catch.hpp
 #endif // TWOBLUECUBES_SINGLE_INCLUDE_CATCH_HPP_INCLUDED
-
